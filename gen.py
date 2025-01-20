@@ -147,75 +147,113 @@ def ejecutar_algoritmo():
             resultado_vars["mejor_decimal"].set(str(evolucion.mejor_decimal_final))
         
         if frame < num_generaciones - 1:
+
+            ## [+] Paso 1, Formación de parejas
+            tamanio_cuarto = max(2, len(evolucion.poblacion) // 4)  # Aseguramos al menos 2 individuos
+            indices_cuarto = np.random.choice(indices_ordenados, size=tamanio_cuarto, replace=False)
+                        
+            # Generar todas las combinaciones posibles de parejas del cuarto seleccionado
             parejas = []
-            for i in range(len(evolucion.poblacion)):
-                if np.random.rand() <= probabilidad_cruza:
-                    j = np.random.randint(0, i + 1)
-                    parejas.append((evolucion.poblacion[indices_ordenados[i]], 
-                                evolucion.poblacion[indices_ordenados[j]]))
-            
-            # Generar descendientes
+            for i in range(len(indices_cuarto)):
+                for j in range(i + 1, len(indices_cuarto)):
+                    if np.random.rand() <= probabilidad_cruza:
+                        padre1 = evolucion.poblacion[indices_cuarto[i]]
+                        padre2 = evolucion.poblacion[indices_cuarto[j]]
+                        parejas.append((padre1, padre2)) 
+
+                        
+           ### [+] 2  Generar descendientes
             descendientes = []
             for padre1, padre2 in parejas:
                 bin_padre1 = representaciones_binarias[padre1]
                 bin_padre2 = representaciones_binarias[padre2]
-                punto_cruza = np.random.randint(1, num_bits - 1)
-                hijo1 = bin_padre1[:punto_cruza] + bin_padre2[punto_cruza:]
-                hijo2 = bin_padre2[:punto_cruza] + bin_padre1[punto_cruza:]
-                descendientes.extend([int(hijo1, 2), int(hijo2, 2)])
-            
-            # ===== Mutación ====
+                
+                # Determinar k (número de posiciones de cruza)
+                max_k = num_bits // 2  # k debe ser menor que n/2
+                k = np.random.randint(1, max_k)  # Al menos 1 posición, máximo n/2-1
+                
+                # Seleccionar k posiciones aleatorias para la cruza
+                posiciones_cruza = np.random.choice(num_bits, size=k, replace=False)
+                
+                # Crear los hijos (inicialmente copias de los padres)
+                hijo1 = list(bin_padre1)
+                hijo2 = list(bin_padre2)
+                
+                # Intercambiar bits solo en las posiciones seleccionadas
+                for pos in posiciones_cruza:
+                    hijo1[pos] = bin_padre2[pos]
+                    hijo2[pos] = bin_padre1[pos]
+                
+                # Convertir de lista a string y luego a decimal
+                hijo1 = ''.join(hijo1)
+                hijo2 = ''.join(hijo2)
+                
+                # Añadir los hijos a la lista de descendientes
+                descendientes.extend([int(hijo1, 2), int(hijo2, 2)]) 
+
+            ## [3] ===== Mutación ====
             for i in range(len(descendientes)):
-                if np.random.rand() <= probabilidad_mutacion:
+                if np.random.rand() <= probabilidad_mutacion:  # Evalúa si el individuo muta
                     bin_hijo = representaciones_binarias[descendientes[i]]
-                    for bit in range(num_bits):
-                        if np.random.rand() <= probabilidad_mutacion_bits:
+                    for bit in range(num_bits):  # Para cada bit/gen
+                        if np.random.rand() <= probabilidad_mutacion_bits:  # Evalúa si el gen muta
                             bin_hijo = (bin_hijo[:bit] + 
-                                    ('1' if bin_hijo[bit] == '0' else '0') + 
+                                    ('1' if bin_hijo[bit] == '0' else '0') +  # Complementa el bit
                                     bin_hijo[bit + 1:])
                     descendientes[i] = int(bin_hijo, 2)
 
-            # ==== IMPLEMENTACIÓN DE LA PODA ====
+            ## [+] 4 ==== IMPLEMENTACIÓN DE LA PODA ALEATORIA CONSERVANDO EL MEJOR ====
 
             # 1. Combinar población actual con descendientes
             poblacion_combinada = np.concatenate([evolucion.poblacion, descendientes])
-            
+
             # 2. Calcular aptitud de cada individuo
             x_combinada = valores_x_filtrados[poblacion_combinada]
             aptitudes_combinadas = function_objetivo(x_combinada)
-            
+
             # 3. Mantener un solo ejemplar (eliminar repetidos)
-            # Crear un array de índices únicos basados en los valores x
             _, indices_unicos = np.unique(x_combinada, return_index=True)
             poblacion_sin_repetidos = poblacion_combinada[indices_unicos]
             aptitudes_sin_repetidos = aptitudes_combinadas[indices_unicos]
-            
-            # 4. Eliminar sobrantes manteniendo los mejores hasta el tamaño de población
+
+            # 4. Encontrar el mejor individuo
             if evolucion.minimizar:
-                indices_ordenados = np.argsort(aptitudes_sin_repetidos) # Ordenar de mayor a menor
+                mejor_indice = np.argmin(aptitudes_sin_repetidos)
             else:
-                indices_ordenados = np.argsort(aptitudes_sin_repetidos)[::-1]  # Ordenar descendente
+                mejor_indice = np.argmax(aptitudes_sin_repetidos)
 
-            if len(indices_ordenados) > cantidad_poblacion:
-                indices_seleccionados = indices_ordenados[:cantidad_poblacion]
-            else: 
+            mejor_individuo = poblacion_sin_repetidos[mejor_indice]
 
-                # Tomar solo los mejores hasta alcanzar el tamaño de población deseado
-                if len(indices_ordenados) > cantidad_poblacion:
-                    indices_seleccionados = indices_ordenados[:cantidad_poblacion]
-                else:
-                    # Si no hay suficientes individuos únicos, completar con algunos aleatorios
-                    indices_seleccionados = indices_ordenados
-                    num_faltantes = cantidad_poblacion - len(indices_seleccionados)
-                    if num_faltantes > 0:
-                        indices_aleatorios = np.random.choice(len(valores_x_filtrados), 
-                                                            size=num_faltantes, 
-                                                            replace=False)
-                        poblacion_sin_repetidos = np.append(poblacion_sin_repetidos, indices_aleatorios)
-                        indices_seleccionados = np.arange(len(poblacion_sin_repetidos))
+            # 5. Realizar la poda aleatoria conservando el mejor
+            if len(poblacion_sin_repetidos) > cantidad_poblacion:
+                # Remover el mejor individuo temporalmente
+                poblacion_sin_mejor = np.delete(poblacion_sin_repetidos, mejor_indice)
                 
-                # Actualizar la población con los individuos seleccionados
-                evolucion.poblacion = poblacion_sin_repetidos[indices_seleccionados]
+                # Seleccionar aleatoriamente hasta completar cantidad_poblacion - 1
+                indices_aleatorios = np.random.choice(
+                    len(poblacion_sin_mejor),
+                    size=cantidad_poblacion - 1,
+                    replace=False
+                )
+                
+                # Combinar el mejor individuo con los seleccionados aleatoriamente
+                evolucion.poblacion = np.concatenate([[mejor_individuo], 
+                                                    poblacion_sin_mejor[indices_aleatorios]])
+            else:
+                # Si no hay suficientes individuos únicos, completar con algunos aleatorios
+                num_faltantes = cantidad_poblacion - len(poblacion_sin_repetidos)
+                if num_faltantes > 0:
+                    indices_aleatorios = np.random.choice(
+                        len(valores_x_filtrados),
+                        size=num_faltantes,
+                        replace=False
+                    )
+                    evolucion.poblacion = np.concatenate([
+                        poblacion_sin_repetidos,
+                        indices_aleatorios
+                    ])
+                else:
+                    evolucion.poblacion = poblacion_sin_repetidos
 
         evolucion.fig.canvas.draw()
         save_frame(evolucion.fig, frame, evolucion.temp_dir, evolucion.frame_files)
